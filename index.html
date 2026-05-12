@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Power Breaker Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #020617;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            color: white;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            background: radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: none;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .stat-box {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            padding: 10px 18px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-width: 100px;
+        }
+
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(2, 6, 23, 0.9);
+            backdrop-filter: blur(15px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            padding: 16px 44px;
+            border-radius: 9999px;
+            font-weight: 800;
+            font-size: 1.3rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5);
+            pointer-events: auto;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:active { transform: scale(0.95); }
+
+        .hidden { display: none !important; }
+
+        #powerup-timers {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 10;
+        }
+
+        .powerup-indicator {
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.7);
+            border: 1px solid rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div class="ui-layer">
+            <div class="stat-box">
+                <span class="text-blue-400 text-[10px] font-bold uppercase tracking-widest">Score</span>
+                <div id="score" class="text-2xl font-black">0</div>
+            </div>
+            <div class="stat-box text-center border-emerald-500/30">
+                <span class="text-emerald-400 text-[10px] font-bold uppercase tracking-widest">Level</span>
+                <div id="level" class="text-2xl font-black">1</div>
+            </div>
+            <div class="stat-box text-right">
+                <span class="text-rose-400 text-[10px] font-bold uppercase tracking-widest">Lives</span>
+                <div id="lives" class="text-2xl font-black">3</div>
+            </div>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="powerup-timers"></div>
+
+        <div id="start-overlay" class="overlay">
+            <h1 class="text-7xl font-black mb-8 text-center tracking-tighter italic">
+                <span class="text-blue-500">POWER</span><br>BREAKER
+            </h1>
+            <button class="btn" id="start-btn">Start Mission</button>
+            <div class="mt-12 grid grid-cols-3 gap-8 text-center text-[11px] text-slate-400 max-w-xs">
+                <div class="flex flex-col items-center gap-2"><span class="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center text-white text-lg font-bold">+</span>멀티볼</div>
+                <div class="flex flex-col items-center gap-2"><span class="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center text-white text-lg font-bold">↔</span>패들 확장</div>
+                <div class="flex flex-col items-center gap-2"><span class="w-10 h-10 rounded-lg bg-rose-500 flex items-center justify-center text-white text-lg font-bold">🚀</span>미사일</div>
+            </div>
+        </div>
+
+        <div id="gameover-overlay" class="overlay hidden">
+            <h2 class="text-5xl font-black mb-2 text-white italic">GAME OVER</h2>
+            <p id="final-score" class="text-2xl text-slate-400 mb-10">Final Score: 0</p>
+            <button class="btn" id="restart-btn">Try Again</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const timersContainer = document.getElementById('powerup-timers');
+        
+        let gameState = 'START';
+        let score = 0;
+        let level = 1;
+        let lives = 3;
+        let animationId;
+
+        const config = {
+            basePaddleWidth: 120,
+            extendedPaddleWidth: 200,
+            narrowPaddleWidth: 70,
+            paddleHeight: 16,
+            ballRadius: 8,
+            brickRowCount: 5,
+            brickColumnCount: 8,
+            brickPadding: 12,
+            brickOffsetTop: 100,
+            brickOffsetLeft: 20,
+            initialBallSpeed: 6,
+            fastBallSpeed: 10,
+            paddleKeyboardSpeed: 12,
+            bombRadius: 100 // 폭탄 폭발 반경
+        };
+
+        class Ball {
+            constructor(x, y, dx, dy) {
+                this.x = x;
+                this.y = y;
+                this.dx = dx;
+                this.dy = dy;
+                this.radius = config.ballRadius;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                
+                // 공에 발광 효과 추가
+                ctx.fillStyle = "#fff";
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = "#3b82f6";
+                ctx.fill();
+                
+                // 공 내부 하이라이트
+                ctx.beginPath();
+                ctx.arc(this.x - 2, this.y - 2, this.radius / 3, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                ctx.fill();
+                
+                ctx.restore();
+            }
+
+            update() {
+                // 벽 충돌 체크 (좌우)
+                if (this.x + this.dx > canvas.width - this.radius || this.x + this.dx < this.radius) {
+                    this.dx = -this.dx;
+                    createExplosion(this.x, this.y, "#fff", 5);
+                }
+                
+                // 천장 충돌 체크
+                if (this.y + this.dy < this.radius) {
+                    this.dy = -this.dy;
+                    createExplosion(this.x, this.y, "#fff", 5);
+                }
+
+                this.x += this.dx;
+                this.y += this.dy;
+            }
+        }
+
+        let paddle = { x: 0, width: config.basePaddleWidth, isExtended: false, extendedTimeout: null };
+        let keys = { left: false, right: false };
+        let balls = [];
+        let bricks = [];
+        let items = [];
+        let particles = [];
+        let missiles = [];
+        let missileActive = false;
+        let missileTimeout = null;
+        let speedActive = false;
+        let speedTimeout = null;
+        let bombCharges = 0; // 남은 폭탄 횟수
+        let lastMissileTime = 0;
+
+        class Item {
+            constructor(x, y, type) {
+                this.x = x; this.y = y; this.type = type;
+                this.size = 32; this.speed = 3.5;
+            }
+            draw() {
+                ctx.save();
+                ctx.beginPath();
+                ctx.roundRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size, 10);
+                let color, icon;
+                if (this.type === 'multiball') { color = '#10b981'; icon = '+'; }
+                else if (this.type === 'expand') { color = '#3b82f6'; icon = '↔'; }
+                else if (this.type === 'missile') { color = '#ef4444'; icon = '🚀'; }
+                else if (this.type === 'life') { color = '#f43f5e'; icon = '♥'; }
+                else if (this.type === 'speed') { color = '#f59e0b'; icon = '⚡'; }
+                else if (this.type === 'narrow') { color = '#6366f1'; icon = '→←'; }
+                else if (this.type === 'bomb') { color = '#fb923c'; icon = '💣'; }
+                
+                ctx.fillStyle = color; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Inter';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(icon, this.x, this.y);
+                ctx.restore();
+            }
+            update() { this.y += this.speed; }
+        }
+
+        class Missile {
+            constructor(x, y) { this.x = x; this.y = y; this.speed = 12; }
+            draw() {
+                ctx.fillStyle = '#f43f5e';
+                ctx.fillRect(this.x - 3, this.y, 6, 18);
+                ctx.shadowBlur = 10; ctx.shadowColor = '#f43f5e';
+            }
+            update() { this.y -= this.speed; }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y;
+                this.size = Math.random() * 4 + 1;
+                this.speedX = (Math.random() - 0.5) * 10;
+                this.speedY = (Math.random() - 0.5) * 10;
+                this.color = color;
+                this.alpha = 1;
+            }
+            update() { this.x += this.speedX; this.y += this.speedY; this.alpha -= 0.02; }
+            draw() {
+                ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function initBricks() {
+            const availableWidth = canvas.width - (config.brickOffsetLeft * 2);
+            const totalPadding = config.brickPadding * (config.brickColumnCount - 1);
+            const brickWidth = (availableWidth - totalPadding) / config.brickColumnCount;
+            const brickHeight = 28;
+
+            bricks = [];
+            for (let c = 0; c < config.brickColumnCount; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < config.brickRowCount; r++) {
+                    bricks[c][r] = { 
+                        x: 0, y: 0, status: 1, 
+                        color: `hsl(${200 + (r * 30)}, 75%, 60%)`,
+                        width: brickWidth, height: brickHeight 
+                    };
+                }
+            }
+        }
+
+        function activatePowerUp(type) {
+            if (type === 'multiball') {
+                const len = balls.length;
+                for(let i=0; i<len; i++) {
+                    let b = balls[i];
+                    balls.push(new Ball(b.x, b.y, -b.dx, b.dy));
+                }
+            } else if (type === 'expand') {
+                paddle.width = config.extendedPaddleWidth;
+                if (paddle.extendedTimeout) clearTimeout(paddle.extendedTimeout);
+                paddle.extendedTimeout = setTimeout(() => { paddle.width = config.basePaddleWidth; updateTimerUI(); }, 10000);
+            } else if (type === 'missile') {
+                missileActive = true;
+                if (missileTimeout) clearTimeout(paddle.missileTimeout);
+                missileTimeout = setTimeout(() => { missileActive = false; updateTimerUI(); }, 8000);
+            } else if (type === 'life') {
+                lives++;
+                document.getElementById('lives').innerText = lives;
+                createExplosion(paddle.x + paddle.width/2, canvas.height - 40, "#f43f5e", 20);
+            } else if (type === 'speed') {
+                speedActive = true;
+                balls.forEach(b => {
+                    const ratio = config.fastBallSpeed / Math.sqrt(b.dx*b.dx + b.dy*b.dy);
+                    b.dx *= ratio; b.dy *= ratio;
+                });
+                if (speedTimeout) clearTimeout(speedTimeout);
+                speedTimeout = setTimeout(() => {
+                    speedActive = false;
+                    balls.forEach(b => {
+                        const ratio = config.initialBallSpeed / Math.sqrt(b.dx*b.dx + b.dy*b.dy);
+                        b.dx *= ratio; b.dy *= ratio;
+                    });
+                    updateTimerUI();
+                }, 7000);
+            } else if (type === 'narrow') {
+                paddle.width = config.narrowPaddleWidth;
+                if (paddle.extendedTimeout) clearTimeout(paddle.extendedTimeout);
+                paddle.extendedTimeout = setTimeout(() => { paddle.width = config.basePaddleWidth; updateTimerUI(); }, 7000);
+            } else if (type === 'bomb') {
+                bombCharges += 1;
+                createExplosion(paddle.x + paddle.width/2, canvas.height - 40, "#fb923c", 25);
+            }
+            updateTimerUI();
+        }
+
+        function updateTimerUI() {
+            timersContainer.innerHTML = '';
+            if (paddle.width > config.basePaddleWidth) {
+                timersContainer.innerHTML += `<div class="powerup-indicator text-blue-400">↔ PADDLE EXTENDED</div>`;
+            }
+            if (paddle.width < config.basePaddleWidth) {
+                timersContainer.innerHTML += `<div class="powerup-indicator text-indigo-400">→← PADDLE NARROWED</div>`;
+            }
+            if (missileActive) {
+                timersContainer.innerHTML += `<div class="powerup-indicator text-rose-500">🚀 MISSILES ACTIVE</div>`;
+            }
+            if (speedActive) {
+                timersContainer.innerHTML += `<div class="powerup-indicator text-amber-500">⚡ SPEED BOOSTED</div>`;
+            }
+            if (bombCharges > 0) {
+                timersContainer.innerHTML += `<div class="powerup-indicator text-orange-400">💣 BOMB LOADED (${bombCharges})</div>`;
+            }
+        }
+
+        function collisionDetection() {
+            balls.forEach((ball, bIdx) => {
+                for (let c = 0; c < config.brickColumnCount; c++) {
+                    for (let r = 0; r < config.brickRowCount; r++) {
+                        const b = bricks[c][r];
+                        if (b.status === 1) {
+                            if (ball.x > b.x && ball.x < b.x + b.width && ball.y > b.y && ball.y < b.y + b.height) {
+                                ball.dy = -ball.dy;
+                                b.status = 0;
+                                score += 20;
+                                createExplosion(ball.x, ball.y, b.color, 15);
+                                
+                                // 폭탄 아이템 로직
+                                if (bombCharges > 0) {
+                                    triggerBomb(ball.x, ball.y);
+                                    bombCharges--;
+                                    updateTimerUI();
+                                }
+
+                                if (Math.random() < 0.25) {
+                                    const types = ['multiball', 'expand', 'missile', 'life', 'speed', 'narrow', 'bomb'];
+                                    items.push(new Item(b.x + b.width/2, b.y + b.height/2, types[Math.floor(Math.random()*types.length)]));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            missiles.forEach((m, mIdx) => {
+                for (let c = 0; c < config.brickColumnCount; c++) {
+                    for (let r = 0; r < config.brickRowCount; r++) {
+                        const b = bricks[c][r];
+                        if (b.status === 1) {
+                            if (m.x > b.x && m.x < b.x + b.width && m.y > b.y && m.y < b.y + b.height) {
+                                b.status = 0;
+                                score += 10;
+                                missiles.splice(mIdx, 1);
+                                createExplosion(m.x, m.y, b.color, 12);
+                                return; // 한 번에 하나의 미사일은 하나의 벽돌만 제거
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 아이템 획득 로직
+            items.forEach((item, index) => {
+                if (item.y + item.size/2 > canvas.height - 35 && 
+                    item.x > paddle.x && item.x < paddle.x + paddle.width) {
+                    activatePowerUp(item.type);
+                    items.splice(index, 1);
+                } else if (item.y > canvas.height) {
+                    items.splice(index, 1);
+                }
+            });
+
+            // 공과 패들 충돌
+            balls.forEach(ball => {
+                if (ball.y + ball.dy > canvas.height - 35 - config.ballRadius) {
+                    if (ball.x > paddle.x && ball.x < paddle.x + paddle.width) {
+                        let hitPos = (ball.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+                        let speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+                        ball.dx = hitPos * speed * 0.8;
+                        ball.dy = -Math.sqrt(speed * speed - ball.dx * ball.dx);
+                    }
+                }
+            });
+        }
+
+        function triggerBomb(x, y) {
+            // 화려한 대폭발 효과
+            createExplosion(x, y, "#fb923c", 40);
+            createExplosion(x, y, "#f87171", 30);
+            
+            bricks.forEach(column => {
+                column.forEach(b => {
+                    if (b.status === 1) {
+                        const centerX = b.x + b.width / 2;
+                        const centerY = b.y + b.height / 2;
+                        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+                        
+                        if (dist < config.bombRadius) {
+                            b.status = 0;
+                            score += 20;
+                            createExplosion(centerX, centerY, b.color, 10);
+                        }
+                    }
+                });
+            });
+        }
+
+        function createExplosion(x, y, color, count) {
+            for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+        }
+
+        function draw() {
+            if (gameState !== 'PLAYING') return;
+            
+            if (keys.left && paddle.x > 0) {
+                paddle.x -= config.paddleKeyboardSpeed;
+            }
+            if (keys.right && paddle.x < canvas.width - paddle.width) {
+                paddle.x += config.paddleKeyboardSpeed;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Bricks
+            let remaining = 0;
+            for (let c = 0; c < config.brickColumnCount; c++) {
+                for (let r = 0; r < config.brickRowCount; r++) {
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        remaining++;
+                        b.x = c * (b.width + config.brickPadding) + config.brickOffsetLeft;
+                        b.y = r * (b.height + config.brickPadding) + config.brickOffsetTop;
+                        ctx.beginPath(); ctx.roundRect(b.x, b.y, b.width, b.height, 8);
+                        ctx.fillStyle = b.color; ctx.fill();
+                        ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.stroke();
+                    }
+                }
+            }
+
+            if (remaining === 0) { level++; document.getElementById('level').innerText = level; initBricks(); resetBall(); }
+
+            // Missiles
+            if (missileActive && Date.now() - lastMissileTime > 400) {
+                missiles.push(new Missile(paddle.x + 10, canvas.height - 40));
+                missiles.push(new Missile(paddle.x + paddle.width - 10, canvas.height - 40));
+                lastMissileTime = Date.now();
+            }
+
+            balls.forEach((ball, index) => {
+                ball.update(); ball.draw();
+                if (ball.y > canvas.height) balls.splice(index, 1);
+            });
+
+            if (balls.length === 0) {
+                lives--; document.getElementById('lives').innerText = lives;
+                if (lives <= 0) gameOver(); else resetBall();
+            }
+
+            missiles.forEach((m, i) => { m.update(); m.draw(); if(m.y < 0) missiles.splice(i, 1); });
+            items.forEach(item => { item.update(); item.draw(); });
+            particles.forEach((p, i) => { p.update(); p.draw(); if(p.alpha <= 0) particles.splice(i, 1); });
+
+            // Paddle
+            const pGrad = ctx.createLinearGradient(paddle.x, 0, paddle.x + paddle.width, 0);
+            pGrad.addColorStop(0, "#2563eb"); pGrad.addColorStop(1, "#8b5cf6");
+            ctx.beginPath(); ctx.roundRect(paddle.x, canvas.height - 35, paddle.width, config.paddleHeight, 10);
+            ctx.fillStyle = pGrad; ctx.fill();
+            ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 2; ctx.stroke();
+
+            collisionDetection();
+            animationId = requestAnimationFrame(draw);
+        }
+
+        function moveHandler(e) {
+            let relativeX = e.touches ? e.touches[0].clientX : e.clientX;
+            paddle.x = relativeX - paddle.width / 2;
+            if (paddle.x < 0) paddle.x = 0;
+            if (paddle.x > canvas.width - paddle.width) paddle.x = canvas.width - paddle.width;
+        }
+
+        function resetBall() {
+            balls = [new Ball(canvas.width/2, canvas.height-100, config.initialBallSpeed, -config.initialBallSpeed)];
+            items = []; missiles = [];
+        }
+
+        function startGame() {
+            score = 0; level = 1; lives = 3;
+            document.getElementById('score').innerText = 0;
+            document.getElementById('level').innerText = 1;
+            document.getElementById('lives').innerText = 3;
+            gameState = 'PLAYING';
+            document.getElementById('start-overlay').classList.add('hidden');
+            document.getElementById('gameover-overlay').classList.add('hidden');
+            resetBall(); initBricks();
+            if (animationId) cancelAnimationFrame(animationId);
+            draw();
+        }
+
+        function gameOver() {
+            gameState = 'GAMEOVER';
+            document.getElementById('final-score').innerText = `Final Score: ${score}`;
+            document.getElementById('gameover-overlay').classList.remove('hidden');
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowLeft" || e.key === "Left") keys.left = true;
+            if (e.key === "ArrowRight" || e.key === "Right") keys.right = true;
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.key === "ArrowLeft" || e.key === "Left") keys.left = false;
+            if (e.key === "ArrowRight" || e.key === "Right") keys.right = false;
+        });
+
+        window.addEventListener("mousemove", moveHandler);
+        window.addEventListener("touchmove", (e) => { moveHandler(e); e.preventDefault(); }, { passive: false });
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('restart-btn').addEventListener('click', startGame);
+        
+        window.onload = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            paddle.x = (canvas.width - paddle.width) / 2;
+            initBricks();
+        };
+
+        window.onresize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            initBricks();
+        };
+    </script>
+</body>
+</html>
